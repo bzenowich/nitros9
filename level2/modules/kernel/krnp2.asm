@@ -152,9 +152,19 @@ done                puls      b         ; restore task #
                     lslb                ; adjust task # to fit table
                     ldu       b,u       ; get the DAT image pointer
                     leau      a,u       ; point to the blocks needed
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    orcc      #IntMasks ; shut IRQ's down
+                    lda       ,u        ; the blocks' high bytes, into the map's -
+                    ldb       2,u       ; no stack: it may be in slot 5 or 6
+                    addd      #RAM.Hi*256+RAM.Hi
+                    std       >DAT.RegsHi+5
+                    lda       1,u       ; get 1st block
+                    ldb       3,u       ; get a second in case of overlap
+                  ELSE
                     lda       1,u       ; get 1st block
                     ldb       3,u       ; get a second in case of overlap
                     orcc      #IntMasks ; shut IRQ's down
+                  ENDC
                     std       >DAT.Regs+5 ; map in the blocks
                   IFNE    H6309   ; begin conditional assembly for H6309
                     ldw       #R$Size   ; get size of register stack
@@ -167,6 +177,12 @@ Uday                lda       ,x+       ; load A from ,x+
                     bne       Uday      ; branch if zero is clear to Uday
                   ENDC
                     ldx       <D.SysDAT ; get the system DAT image pointer
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    lda       $0A,x     ; the system's slots 5 and 6, high bytes
+                    ldb       $0C,x
+                    addd      #RAM.Hi*256+RAM.Hi
+                    std       >DAT.RegsHi+5
+                  ENDC
                     lda       $0B,x     ; get the original blocks
                     ldb       $0D,x     ; load B from $0D,x
                     std       >DAT.Regs+5 ; map 'em back in

@@ -23,7 +23,23 @@ srchblk             cmpx      <D.BlkMap+2 ; hit end of map yet?
 * Entry: Y=pointer to start of memory found
 * Note: Due to fact that block map always starts @ $200 (up to $2FF), we
 *       don't need to calculate A
-FAllramStartReqBlk  tfr       y,d       ; copy the start of the requested block memory pointer to D (B)
+FAllramStartReqBlk  equ       *
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* arm6309: the block map is not at $0200 and a block number is 16 bits, so
+* the number is the offset into the map, not the pointer's low byte.
+                    tfr       y,d
+                    subd      <D.BlkMap ; the 16-bit starting block number
+                    pshs      d         ; [block] [count] [x] [y]
+                    lda       2,s       ; the number of blocks requested
+ArmAllFlag          inc       ,y+       ; flag the blocks as used
+                    deca
+                    bne       ArmAllFlag
+                    puls      d
+                    std       R$D,u     ; save for the caller
+                    leas      1,s       ; the count
+                    puls      x,y,pc
+                  ELSE
+                    tfr       y,d       ; copy the start of the requested block memory pointer to D (B)
                     lda       ,s        ; get the number blocks requested
                     stb       ,s        ; save the starting block number
 FAllramFlagBlksUsed inc       ,y+       ; flag the blocks as used
@@ -33,6 +49,7 @@ FAllramFlagBlksUsed inc       ,y+       ; flag the blocks as used
                     clra                ; (allow for D as per original calls)
                     std       R$D,u     ; save for the caller
                     puls      x,y,pc    ; restore the registers and return
+                  ENDC
 
 FAllramCarry        comb                ; set the carry
                     ldb       #E$NoRAM  ; exit with No RAM error

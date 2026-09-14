@@ -29,9 +29,17 @@ ARM6309.D           SET       1
 *     task's DAT image is KrnBlk, as on the Pico-Thing, so the kernel's
 *     vector stubs and SWI stack are visible in every map.
 *   - $FF90-$FF9F is the map's high byte, not INIT0/IRQ/timer/video.
-*     NitrOS-9 block numbers are the LOW byte only; the loader sets
-*     every high byte to RAM.Hi once, so blocks 0-$FF are the first
-*     2 MB of the first SIMM socket (physical 4.0-6.0 MB).
+*     A NitrOS-9 block number is 16 bits, as the DAT image already holds
+*     it, and block b is physical page $200 + b: the map entry's low byte
+*     is b's low byte and its high byte is RAM.Hi + b's high byte.  Every
+*     kernel site that points a slot at a block writes both (the arm6309
+*     conditionals in krn, fld, fldabx, fmove, fallram, krnp2).
+*   - so RAM is contiguous from SIMM socket 0: blocks 0-$1FF are socket 0,
+*     $200-$3FF socket 1.  The block map holds ArmBlkMax = 1024 blocks,
+*     8 MB, because F$GBlkMp's callers (mfree, pmap, smap) pass a 1,024
+*     byte buffer; the other 8 MB of a full bank would need a different
+*     call.  The loader reads how much there is from the boot ROM's
+*     memory descriptor (arm6309 software/boot/README.md) into D.BlkCnt.
 *   - $FFB0-$FFBF is TASK (even) and RUN (odd), not the palette.
 *   - the vectors at $FFF2-$FFFD point at $FEEE-$FEFD, the CoCo 3
 *     addresses; in NitrOS-9 that is the kernel's BRA stubs in KrnBlk.
@@ -79,12 +87,12 @@ DAT.TkCt            EQU       32        number of DAT tasks
 DAT.Regs            EQU       $FFA0     map entry low bytes
 DAT.RegsHi          EQU       $FF90     map entry high bytes
 DAT.Free            EQU       $333E     free block marker
-DAT.BlMx            EQU       $FF       maximum block number
-DAT.BMSz            EQU       $100      memory block map size
+DAT.BlMx            EQU       ArmBlkMax-1 maximum block number
+DAT.BMSz            EQU       ArmBlkMax memory block map size
 DAT.WrPr            EQU       0         no write protect
 DAT.WrEn            EQU       0         no write enable
 SysTask             EQU       0         system task number
-RAM.Hi              EQU       $02       high byte: SIMM socket 0, 4.0-6.0 MB
+RAM.Hi              EQU       $02       high byte of block 0: SIMM socket 0, from 4.0 MB
 ROM.Hi              EQU       $01       high byte: the boot ROM, 2.0-3.0 MB
 KrnBlk              SET       $3F       RAM block holding the kernel
 
@@ -143,6 +151,14 @@ VSTAT.VBL           EQU       %00000001
 * GIME's FIRQ-enable and timer shadows, which nothing on this machine has.
 D.FIRQSt            EQU       D.FRQER
 ArmFIRQStkSz        EQU       192
+
+********************************************************************
+* RAM beyond 2 MB (docs/nitros9-av-plan.md X2)
+ArmBlkMax           EQU       1024      blocks the block map holds: 8 MB
+ArmBlkMap           EQU       $E000     the block map, in KrnBlk below Bt.Start
+* D.BlkCnt: the loader's count of RAM blocks contiguous from socket 0,
+* capped at ArmBlkMax.  os9.d's D.RESV1-D.RESV2, GIME shadows no one here has.
+D.BlkCnt            EQU       D.RESV1
 
 * No shift key on a serial console
 SHIFTBIT            EQU       0

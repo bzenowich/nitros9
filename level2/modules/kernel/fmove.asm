@@ -78,7 +78,9 @@ FMoveTarget         pshs      d,x,y,u   ; preserve it all
 * Registers: X=Source pointer
 *            U=Destination pointer
 FMoveJoin           equ       *         ; define assembler symbol FMoveJoin
-                  IFNE    H6309   ; begin conditional assembly for H6309
+* arm6309 takes the 6809 path on either CPU: its blocks are 16 bits and the
+* 6809 path is the one with the high bytes in it (defs/arm6309.d).
+                  IFNE    H6309-H6309*arm6309 ; H6309 and not arm6309
                   IFNE    picothing ; begin conditional assembly for picothing
 * WARNING: before enabling H6309 native mode on Pico-Thing, this path
 * needs the same KrnBlk fixed-window guard as the 6809 path below —
@@ -183,6 +185,15 @@ ndst@               puls      y         ; reload the (possibly adjusted) pages
                   ENDC
                     orcc      #IntMasks ; shut IRQ's off
                     stb       <D.IRQTmp+1 ; save copy of current copy block size
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* The two blocks' high bytes, into the map's.  No stack from here to the
+* restore: the stack may be in slot 5 or 6.  B comes back from D.IRQTmp+1.
+                    lda       [10,s]    ; the source's image entry, high byte
+                    ldb       [6,s]     ; the destination's
+                    addd      #RAM.Hi*256+RAM.Hi
+                    std       >DAT.RegsHi+5
+                    ldb       <D.IRQTmp+1 ; the copy size again
+                  ENDC
                     sty       >DAT.Regs+5 ; swap in source/dest MMU blocks into $A000-$DFFF
 ***** NO STACK USE BETWEEN HERE.....
                     andb      #$07      ; 2 1st, do single byte copies for 1-7 leftover bytes
@@ -209,6 +220,12 @@ FMoveCyclsPerByts   pulu      y,d       ; 9 55 cycles per 8 bytes copied
                     bne       FMoveCyclsPerByts ; 3
                     exg       x,u       ; 8 Swap updated source/dest ptrs
 FMoveSystemDAT      ldy       <D.SysDAT ; 6 Get system DAT pointer
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    lda       $0A,y     ; the system's slots 5 and 6, high bytes
+                    ldb       $0C,y
+                    addd      #RAM.Hi*256+RAM.Hi
+                    std       >DAT.RegsHi+5
+                  ENDC
                     lda       $0B,y     ; 5 Get original MMU blocks
                     ldb       $0D,y     ; 5
                     std       >DAT.Regs+5 ; 6 Restore originals

@@ -37,9 +37,20 @@ FLdMMUBlockData     lda       1,y       ; get MMU block # to get data from
                     puls      pc,cc     ; return, no DAT slot was touched
 mblk@               equ       *         ; remap path for an ordinary block
                   ENDC
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    ldb       ,y        ; the block's high byte, into the map's
+                    addb      #RAM.Hi
+                    stb       >DAT.RegsHi
+                    sta       >DAT.Regs ; map block into $0000-$1FFF
+                    lda       ,x        ; get byte
+                    ldb       #RAM.Hi   ; block 0 back: high byte ...
+                    stb       >DAT.RegsHi
+                    clr       >DAT.Regs ; ... and low
+                  ELSE
                     sta       >DAT.Regs ; map block into $0000-$1FFF
                     lda       ,x        ; get byte
                     stb       >DAT.Regs ; map block 0 into $0000-$1FFF
+                  ENDC
                   ENDC
                     puls      pc,cc     ; get interrupt status/(or turn on) & return
 
@@ -58,9 +69,20 @@ LDAXY               lda       1,y       ; get MMU block #
                     bra       AdjBlk0   ; go adjust X and Y for block wrap
 lax@                equ       *         ; remap path for an ordinary block
                   ENDC
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    ldb       ,y        ; the block's high byte, into the map's
+                    addb      #RAM.Hi
+                    stb       >DAT.RegsHi
+                    sta       >DAT.Regs ; map in MMU block into slot 0
+                    lda       ,x+       ; get byte
+                    ldb       #RAM.Hi   ; block 0 back
+                    stb       >DAT.RegsHi
+                    clr       >DAT.Regs
+                  ELSE
                     sta       >DAT.Regs ; map in MMU block into slot 0
                     lda       ,x+       ; get byte
                     stb       >DAT.Regs ; map MMU block #0 back
+                  ENDC
                     puls      b,cc      ; restore b,cc from the stack
                     bra       AdjBlk0   ; branch unconditionally to AdjBlk0
 
@@ -120,6 +142,33 @@ fldt@               ldu       >DAT.Regs ; save actual hardware slots 0 and 1
                     ldd       ,x        ; get 2 bytes
                     stu       >DAT.Regs ; restore original hardware slots
                   ELSE
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* both bytes of both blocks, and both bytes of both back (defs/arm6309.d).
+* NOTE: NO STACK BETWEEN THE FIRST MAP WRITE AND THE LAST: slot 0 is where the
+* stack is.  U holds the system's slot 1 and Y the result (Y was pushed).
+                    ldu       <D.SysDAT
+                    ldu       2,u       ; U = the system's slot 1, both bytes
+                    pshs      cc
+                    orcc      #IntMasks
+                    ldd       ,y        ; block for slot 0
+                    adda      #RAM.Hi
+                    sta       >DAT.RegsHi
+                    stb       >DAT.Regs
+                    ldd       2,y       ; block for slot 1
+                    adda      #RAM.Hi
+                    sta       >DAT.RegsHi+1
+                    stb       >DAT.Regs+1
+                    ldy       ,x        ; get 2 bytes
+                    tfr       u,d       ; slot 1 back
+                    adda      #RAM.Hi
+                    sta       >DAT.RegsHi+1
+                    stb       >DAT.Regs+1
+                    lda       #RAM.Hi   ; slot 0 back: block 0
+                    sta       >DAT.RegsHi
+                    clr       >DAT.Regs
+                    tfr       y,d       ; the 2 bytes
+                    puls      pc,u,y,x,cc
+                  ELSE
                     ldu       <D.SysDAT ; get sys DAT Image ptr
                     clra                ; system block 0 =0 always
                     ldb       3,u       ; get MMU block #1
@@ -131,5 +180,6 @@ fldt@               ldu       >DAT.Regs ; save actual hardware slots 0 and 1
                     std       >DAT.Regs ; map in both blocks
                     ldd       ,x        ; get 2 bytes
                     stu       >DAT.Regs ; map original blocks in
+                  ENDC
                   ENDC
                     puls      pc,u,y,x,cc ; restore regs & return

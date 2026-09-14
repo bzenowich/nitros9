@@ -68,12 +68,39 @@ skip@               inca
                     clr       DAT.Task  task 0
                     lds       #$0800    krn sets its own; this is for us
 
+* 1a. how much RAM: the boot ROM's memory descriptor (arm6309
+* software/boot/README.md) is at logical $0000 of the lowest populated socket
+* - byte 0 the socket bitmap, bytes 1-2 the total in 8K blocks - and slot 0
+* now points at socket 0's first page.  NitrOS-9's blocks are contiguous from
+* socket 0, so the count is 512 per socket up to the first empty one, capped
+* at the total the walk measured (a small module) and at ArmBlkMax.
+                    ldx       #0        blocks
+                    lda       $0000     the socket bitmap
+                    ldb       #4
+sock@               lsra
+                    bcc       sized@    the first empty socket ends the run
+                    leax      512,x
+                    decb
+                    bne       sock@
+sized@              cmpx      $0001     no more than the walk found
+                    bls       tot@
+                    ldx       $0001
+tot@                cmpx      #ArmBlkMax
+                    bls       cap@
+                    ldx       #ArmBlkMax
+cap@                pshs      x         kept on the stack across the clear
+                    cmpx      #64       half a megabyte is the least this boots in
+                    bhs       ArmDP
+nomem@              bra       nomem@    no socket 0: nothing to boot in
+
 * 2. the direct page
-                    ldx       #$0000
+ArmDP               ldx       #$0000
                     clra
-dp@                 sta       ,x+
+clr@                sta       ,x+
                     cmpx      #$0100
-                    blo       dp@
+                    blo       clr@
+                    puls      x
+                    stx       <D.BlkCnt the kernel sizes its block map from this
 
 * 3. the console UART, polled, no interrupts (sc16550 takes it over)
                     ldx       #UART.Base

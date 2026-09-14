@@ -39,9 +39,19 @@ FLdabxTarget        pshs      cc,a,x,u  ; save cc,a,x,u on the stack
                     bra       ldone@    ; skip the slot mapping
 lmap@               equ       *         ; remap path for an ordinary block
                   ENDC
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    adda      #RAM.Hi   ; A = the block's high byte, from ldd a,u
+                    sta       >DAT.RegsHi
+                    stb       >DAT.Regs ; map block into $0000-$1FFF
+                    ldb       ,x        ; load B from ,x
+                    lda       #RAM.Hi   ; block 0 back
+                    sta       >DAT.RegsHi
+                    clr       >DAT.Regs
+                  ELSE
                     stb       >DAT.Regs ; map block into $0000-$1FFF
                     ldb       ,x        ; load B from ,x
                     clr       >DAT.Regs ; restore mapping at $0000-$1FFF
+                  ENDC
                     endif
 ldone@              puls      cc,a,x,u  ; restore cc,a,x,u from the stack
 
@@ -93,6 +103,27 @@ FLdabxCarry         andcc     #^Carry   ; clear condition-code bits using #^Carr
                     sta       ,x        ; store A at ,x
                     clr       >MMUDAT   ; restore mapping at $0000-$1FFF
                   ELSE
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* NOTE: no stack between the first map write and the last - slot 0 is where
+* the stack is.  U (pushed at entry) holds the map entry, Y the byte.
+                    adda      #RAM.Hi   ; A = the block's high byte, from ldd a,u
+                    tfr       d,u       ; U = the map entry, both bytes
+                    pshs      y
+                    ldb       3,s       ; the byte to store: A at entry, 1,s before this push
+                    clra
+                    tfr       d,y       ; Y = the byte
+                    orcc      #IntMasks
+                    tfr       u,d
+                    sta       >DAT.RegsHi
+                    stb       >DAT.Regs
+                    tfr       y,d
+                    stb       ,x
+                    lda       #RAM.Hi   ; block 0 back
+                    sta       >DAT.RegsHi
+                    clr       >DAT.Regs
+                    puls      y
+                    puls      cc,d,x,u,pc
+                  ENDC
                     lda       1,s       ; load A from 1,s
                     orcc      #IntMasks ; set condition-code bits using #IntMasks
                   IFNE    picothing ; begin conditional assembly for picothing

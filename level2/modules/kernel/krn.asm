@@ -611,8 +611,9 @@ KrnRsvSlot2         inc       ,x+       ; mark it as used
                   ENDC
 *]]] Wildbits PORT
 
-                  IFNE    picothing ; begin conditional assembly for picothing
+                  IFNE    picothing+arm6309 ; begin conditional assembly for picothing, arm6309
 * Mark kernel block pages ($E0-$FF) as in-use so FSRqMem doesn't allocate them.
+* (arm6309: $E000-$E3FF is the block map, too.)
 * On CoCo3, block 7 is ROM/IO and handled by hardware. On picothing, block 7
 * is real RAM holding the kernel and must be reserved in D.SysMem.
                     leax      $E0-$20,x point to page $E0 in system memory map
@@ -670,6 +671,31 @@ l@                  sta       b,x       ; store the flag in the appropriate offs
 * has the side-effect of marking block 0 as used. It is essential that
 * this occurs, because that block needs to be reserved as it's used for
 * global memory.
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* arm6309 does not probe.  Blocks are 16 bits, so the block map moves out
+* of $0200's 256 bytes to ArmBlkMap in KrnBlk, and its length is the count
+* the loader read from the boot ROM's memory descriptor (defs/arm6309.d).
+* A probe would have to tell an empty SIMM socket from RAM on a bus with
+* no pull-ups, which is the problem the boot ROM already solved.
+                    ldx       #ArmBlkMap ; the block map, 1024 bytes
+                    stx       <D.BlkMap
+                    ldy       #ArmBlkMax
+                    clra
+ArmClrMap           sta       ,x+       ; every block free
+                    leay      -1,y
+                    bne       ArmClrMap
+                    ldx       <D.BlkMap
+                    inc       ,x        ; block 0: system globals
+                    inc       KrnBlk,x  ; and the kernel's block
+                    ldd       <D.BlkCnt ; the loader's count
+                    cmpd      #ArmBlkMax
+                    bls       ArmSized
+                    ldd       #ArmBlkMax
+ArmSized            leax      d,x
+                    stx       <D.BlkMap+2
+                    clrb                ; Mc09KrnStart assumes B = 0
+                    lbra      Mc09KrnStart
+                  ENDC
                     ldx       <D.BlkMap ; get the pointer to 8KB block map
                     inc       KrnBlk,x  ; mark the block holding kernel as used
 
@@ -1033,9 +1059,19 @@ CpSysStkTo          pshs      cc,x,y,u  ; preserve registers
 *        A = The offset into the DAT image of stack.
 *        B = The task number.
 KrnBlockNumberWhere leau      a,u       ; point to the block number where stack is
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    orcc      #IntMasks ; shutdown interrupts while we do this
+                    lda       ,u        ; the blocks' high bytes, into the map's -
+                    ldb       2,u       ; no stack: it may be in slot 5 or 6
+                    addd      #RAM.Hi*256+RAM.Hi
+                    std       >DAT.RegsHi+5
+                    lda       1,u       ; get the first block
+                    ldb       3,u       ; get a second just in case of overlap
+                  ELSE
                     lda       1,u       ; get the first block
                     ldb       3,u       ; get a second just in case of overlap
                     orcc      #IntMasks ; shutdown interrupts while we do this
+                  ENDC
                     std       >DAT.Regs+5 ; map in the blocks
                   IFNE    H6309   ; begin conditional assembly for H6309
                     ldw       #R$Size   ; get the size of register stack
@@ -1048,6 +1084,12 @@ l@                  ldu       ,x++      ; get the source bytes
                     bne       l@        ; branch if not done
                   ENDC
                     ldx       <D.SysDAT ; get the system DAT pointer
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+                    lda       $0A,x     ; the system's slots 5 and 6, high bytes
+                    ldb       $0C,x
+                    addd      #RAM.Hi*256+RAM.Hi
+                    std       >DAT.RegsHi+5
+                  ENDC
                     lda       $0B,x     ; get the first block we took out
                     ldb       $0D,x     ; and the second
                     std       >DAT.Regs+5 ; and restore the DAT
@@ -1367,7 +1409,29 @@ KrnWeGngBack        equ       *
 * Update 8 MMU mappings.
 * X = address of 1st DAT MMU register to update
 * U = address of DAT image to update into MMU
-KrnActualMMUBlock   leau      1,u       ; point to the actual MMU block
+KrnActualMMUBlock   equ       *
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* arm6309: each entry is a 16-bit block, so both bytes go to the map - the
+* low byte to DAT.Regs and RAM.Hi plus the high byte to DAT.RegsHi, sixteen
+* registers below.  Slot 7 is forced to the kernel's block whatever the
+* image says: there is no constant page, and a process image can hold
+* DAT.Free there (F$Chain's rebuild does not restore it), so without this the
+* vector stubs and SWIStack would vanish on a task switch.
+                    ldb       #DAT.BlCt
+                    pshs      b
+ArmBank             ldd       ,u++      ; the entry: block high, block low
+                    adda      #RAM.Hi   ; the map entry's high byte
+                    sta       DAT.RegsHi-DAT.Regs,x
+                    stb       ,x+
+                    dec       ,s
+                    bne       ArmBank
+                    ldd       #RAM.Hi*256+KrnBlk ; slot 7: the kernel's block
+                    sta       DAT.RegsHi-DAT.Regs-1,x
+                    stb       -1,x
+                    puls      b,pc
+                  ELSE
+                    leau      1,u       ; point to the actual MMU block
+                  ENDC
                   IFNE    picothing ; begin conditional assembly for picothing
 * Pico-Thing DAT uses 1 byte per block register (not 2).
 * 8 single-byte copies replace the 4 double-byte copies used by CoCo3.
@@ -1398,15 +1462,6 @@ KrnBank             lda       ,u++      ; get a bank
                     dec       ,s        ; done?
                   ENDC
                     bne       KrnBank   ; no, keep going
-                  IFNE    arm6309 ; begin conditional assembly for arm6309
-* arm6309 has no constant page: slot 7 must be the kernel's block in the
-* hardware whatever the image says, or the vector stubs and SWIStack vanish
-* on the task switch.  A process image can legitimately hold DAT.Free there
-* (the ffreehb guard keeps slot 7 from being handed out, but image rebuilds
-* such as F$Chain's do not restore it), so force it as the Pico-Thing does.
-                    ldb       #KrnBlk   ; the kernel's block
-                    stb       -1,x      ; X points past slot 7's register
-                  ENDC
                   IFEQ    H6309   ; begin conditional assembly for H6309
 * 6809 - 10 cyc down to 8
 *                   leas      1,s                 eat temporary stack

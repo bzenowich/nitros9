@@ -60,7 +60,7 @@ CMDS_MERGED = shell
 # Loadable modules in /DD/MODULES: the FIRQ stub's test (driver + /FT0), and
 # its command in CMDS.
 MODULES = firqtst
-CMDS += firqtst vmodetst ps2tst
+CMDS += firqtst vmodetst ps2tst memtst
 SHELLMODS = shellplus echo iniz link load save unlink
 
 ROM      ?= arm6309_rom.bin
@@ -68,6 +68,14 @@ ROMDSK   ?= romdisk.dsk
 ROMDSK_SECTORS = 4000
 
 all: libs $(ROM)
+
+# What the rules above cannot see: krn and krnp2 are dozens of `use`d files,
+# and every module reads defs/arm6309.d.  Without these a changed kernel file
+# rebuilds nothing and a test runs the previous kernel - which happened.
+KERNEL_SRC = $(wildcard $(L2MD)/kernel/*.asm $(L1MD)/kernel/*.asm)
+$(MODDIR)/krn $(MODDIR)/krnp2: $(KERNEL_SRC)
+$(addprefix $(MODDIR)/,$(filter-out shell,$(BOOTFILE)) boot_romdisk krn $(CMDS) firqtst.dr ft0.dd): $(DEFSDIR)/arm6309.d
+rel_arm6309: $(DEFSDIR)/arm6309.d
 
 include ../../libs.mak
 

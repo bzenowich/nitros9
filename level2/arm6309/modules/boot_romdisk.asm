@@ -101,10 +101,10 @@ cp@                 lda       ,x+
                     sta       ,y+
                     decb
                     bne       cp@
-                    ldb       #RAM.Hi   put slot 1 back as the system DAT image has it
-                    stb       DAT.RegsHi+Slot
-                    ldx       <D.SysDAT
-                    ldb       Slot*2+1,x
+                    ldx       <D.SysDAT put slot 1 back as the system DAT image has it:
+                    ldd       Slot*2,x  both bytes of a 16-bit block (defs/arm6309.d)
+                    adda      #RAM.Hi
+                    sta       DAT.RegsHi+Slot
                     stb       DAT.Regs+Slot
                     puls      cc
                     ldx       blockloc,u
