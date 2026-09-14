@@ -56,6 +56,11 @@ CMDS = attr backup build cmp copy date dcheck debug ded deiniz del deldir \
        procs printerr prompt pwd pxd rename save setime sleep smap tee tmode \
        touch unlink verify xmode $(CMDS_EXTRA)
 CMDS_MERGED = shell
+
+# Loadable modules in /DD/MODULES: the FIRQ stub's test (driver + /FT0), and
+# its command in CMDS.
+MODULES = firqtst
+CMDS += firqtst
 SHELLMODS = shellplus echo iniz link load save unlink
 
 ROM      ?= arm6309_rom.bin
@@ -82,6 +87,12 @@ $(MODDIR)/pwd: pd.asm | $(MODDIR)
 	$(AS) $(AFLAGS) $< $(ASOUT)$@ -DPWD=1
 $(MODDIR)/pxd: pd.asm | $(MODDIR)
 	$(AS) $(AFLAGS) $< $(ASOUT)$@ -DPXD=1
+$(MODDIR)/firqtst.dr: firqtstdrv.asm | $(MODDIR)
+	$(AS) $(AFLAGS) $< $(ASOUT)$@
+$(MODDIR)/ft0.dd: firqtstdesc.asm | $(MODDIR)
+	$(AS) $(AFLAGS) $< $(ASOUT)$@
+modules_firqtst: $(MODDIR)/firqtst.dr $(MODDIR)/ft0.dd
+	$(MERGE) $^ >$@
 $(MODDIR)/shell: $(addprefix $(MODDIR)/,$(SHELLMODS)) | $(MODDIR)
 	$(MERGE) $(addprefix $(MODDIR)/,$(SHELLMODS)) >$@
 
@@ -100,13 +111,16 @@ os9kernel: $(MODDIR)/boot_romdisk $(MODDIR)/krn
 rel_arm6309: rel_arm6309.asm os9kernel
 	$(ASROM) $(AFLAGS) $< $(ASOUT)$@
 
-$(ROMDSK): bootfile $(addprefix $(MODDIR)/,$(CMDS) $(CMDS_MERGED))
+$(ROMDSK): bootfile $(addprefix $(MODDIR)/,$(CMDS) $(CMDS_MERGED)) $(addprefix modules_,$(MODULES))
 	$(RM) $@
 	$(OS9FORMAT) -q -l$(ROMDSK_SECTORS) $@ -n"NitrOS-9/$(CPU) Level 2 arm6309"
 	$(OS9GEN) $@ -b=bootfile
 	$(MAKDIR) $@,CMDS
 	$(OS9COPY) $(addprefix $(MODDIR)/,$(CMDS) $(CMDS_MERGED)) $@,CMDS
 	$(OS9ATTR_EXEC) $(foreach f,$(CMDS) $(CMDS_MERGED),$@,CMDS/$(f))
+	$(MAKDIR) $@,MODULES
+	$(foreach m,$(MODULES),$(OS9COPY) modules_$(m) $@,MODULES/$(m);)
+	$(OS9ATTR_EXEC) $(foreach m,$(MODULES),$@,MODULES/$(m))
 	$(MAKDIR) $@,SYS
 	$(CPL) $(L1D)/sys/errmsg $@,SYS/errmsg
 	$(CPL) $(STARTUP) $@,startup
@@ -126,7 +140,7 @@ $(ROM): rel_arm6309 $(ROMDSK) $(BOOTBIN)
 	@echo "wrote $@"
 
 clean:
-	$(RM) bootfile os9kernel rel_arm6309 $(ROM) $(ROMDSK) buildinfo *.list *.map
+	$(RM) bootfile os9kernel rel_arm6309 $(ROM) $(ROMDSK) buildinfo *.list *.map modules_*
 	-rm -rf $(OBJDIR) $(LIBDIR) $(MODDIR)
 
 .PHONY: all clean libs bootfile

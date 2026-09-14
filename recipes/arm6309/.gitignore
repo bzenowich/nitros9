@@ -5,3 +5,4 @@ rel_arm6309
 os9kernel
 bootfile
 build.log
+modules_*

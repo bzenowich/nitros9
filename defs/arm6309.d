@@ -104,6 +104,33 @@ VSTAT.Busy          EQU       %10000000
 VSTAT.LRun          EQU       %00010000
 VSTAT.VBL           EQU       %00000001
 
+********************************************************************
+* /FIRQ (krn.asm's ArmFIRQ).  The audio card is the only source
+* (machine.md 4).  An owner installs a service with interrupts masked:
+*
+*     orcc  #IntMasks
+*     ldd   <D.FIRQ          save the previous service ...
+*     std   PrevSvc,u
+*     ldd   <D.FIRQSt        ... and its static pointer
+*     std   PrevSt,u
+*     stu   <D.FIRQSt
+*     leax  Service,pcr
+*     stx   <D.FIRQ
+*     andcc #^IntMasks
+*
+* and puts both back in Term.  The service is called with jsr:
+*   entry  U = D.FIRQSt, DP = 0, the system map, IRQ and FIRQ masked,
+*          S = the kernel's FIRQ stack (ArmFIRQStkSz bytes, shared with
+*          any system call the service makes)
+*   exit   rts; may destroy D, X, Y, U and DP.  It must acknowledge its
+*          source: /FIRQ is a level, and it comes straight back.
+* An unowned FIRQ reaches D.Crash, as on every other Level 2 port.
+*
+* D.FIRQSt is the two bytes os9.d names D.FRQER and D.TIMMS: the CoCo 3
+* GIME's FIRQ-enable and timer shadows, which nothing on this machine has.
+D.FIRQSt            EQU       D.FRQER
+ArmFIRQStkSz        EQU       192
+
 * No shift key on a serial console
 SHIFTBIT            EQU       0
 

@@ -1452,13 +1452,66 @@ ArmTailStk          equ       14        R$Size, "REGISTER STACK"
 ArmTailLen          equ       $5B       FIRQVCT to ArmTailEnd
                   ENDC
 ArmTail             equ       ($FF00-Where)-3-ArmTailStk-1-18-ArmTailLen
+
+* The FIRQ stub.  Stock Level 2 crashes on any FIRQ: FIRQVCT forces task 0
+* and DP 0 on an entry that stacked only PC and CC, so nothing could return.
+* This machine's audio card is the only /FIRQ source (machine.md 4), so a
+* FIRQ gets a real entry, kept apart from the kernel's IRQ path:
+*
+*   1. S is saved and replaced by ArmFIRQStk, which is in KrnBlk - slot 7
+*      of every map - so the stack is valid before the map is changed.
+*   2. D, DP, X, Y and U are saved, the system map is selected, and D.TINIT
+*      drops bit 0 as KrnFasterClrXxxx does, so a system call the service
+*      makes (F$Send, typically) is dispatched as a system-state call.
+*   3. jsr [D.FIRQ] with U = D.FIRQSt.  With no owner installed D.FIRQ is
+*      still Vectors, which jumps through D.XFIRQ to D.Crash: an unowned
+*      FIRQ crashes, as it always did, and does not storm.
+*   4. D.TINIT and the map it names are restored, then the registers, then
+*      S, and RTI takes PC and CC (or everything, in 6309 native mode) from
+*      the interrupted stack in the interrupted map.
+*
+* IRQ and FIRQ stay masked throughout, so the service sees what an IRQ
+* handler sees and nothing nests.  The service contract, the static
+* pointer's name and how to install and remove one are in defs/arm6309.d.
+ArmFIRQ             sts       ArmFIRQSavS,pcr ; the interrupted stack, in KrnBlk
+                    leas      ArmFIRQStk,pcr ; a stack that every map can see
+                    pshs      u,y,x,dp,d ; what FIRQ did not stack
+                    clra                ; the system map ...
+                    sta       >DAT.Task ; ... and slot 7 does not move
+                    tfr       a,dp      ; system direct page
+                    ldb       <D.TINIT  ; the map this FIRQ came from
+                    pshs      b
+                    andb      #$FE      ; system state, as KrnFasterClrXxxx leaves it
+                    stb       <D.TINIT
+                    ldu       <D.FIRQSt ; the owner's static storage
+                    ldx       #D.FIRQ   ; (Vectors indexes off X)
+                    jsr       [,x]      ; the owner's service
+                    orcc      #IntMasks ; whatever it did, still masked
+                    clra
+                    tfr       a,dp      ; and on the system direct page
+                    puls      b         ; the interrupted map ...
+                    stb       <D.TINIT  ; ... in the shadow first,
+                    stb       >DAT.Task ; ... then in the hardware
+                    puls      d,dp,x,y,u ; (the stack is in slot 7: still here)
+                    lds       ArmFIRQSavS,pcr
+                    rti
+ArmFIRQSavS         fdb       0         ; S at FIRQ entry
+                    fill      0,ArmFIRQStkSz ; the FIRQ stack, growing down to here
+ArmFIRQStk          equ       *
+
 ArmPad              fill      255,ArmTail-*  ; pad up to the tail
                   ENDC
 *]]] arm6309 PORT
 
 * Execute FIRQ vector (called from $FEF4)
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+FIRQVCT             lbra      ArmFIRQ   ; the FIRQ stub, above the pad
+                    nop                 ; same length as the CoCo 3 entry, so
+                    nop                 ; ArmTailLen holds for both
+                  ELSE
 FIRQVCT             ldx       #D.FIRQ   ; get the DP offset of the vector
                     bra       KrnFasterClrXxxx ; go execute it
+                  ENDC
 
 * Execute IRQ vector (called from $FEF7)
 IRQVCT              orcc      #IntMasks ; disable interrupts
