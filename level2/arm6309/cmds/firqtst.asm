@@ -19,6 +19,11 @@
 *
 * Closing the path stops the timer (the driver's Term).
 *
+* "firqtst q" is the same test at a fifth of the length - 20 ticks, and one
+* pass of the loop instead of four - for the RTL machine, where a machine
+* second is minutes (arm6309 machine_tb +scenario=nitros9).  Its lines say
+* "in 20 ticks" and "in user state"; about 14 and 29.
+*
 * Edt/Rev  YYYY/MM/DD  Modified by
 * Comment
 * ------------------------------------------------------------------
@@ -41,6 +46,8 @@ path                rmb       1
 before              rmb       2
 count               rmb       2
 verdict             rmb       1
+ticks               rmb       2         100, or 20 for "q"
+passes              rmb       1         4, or 1 for "q"
 outer               rmb       1
 buf                 rmb       64
                     rmb       200       stack
@@ -52,6 +59,8 @@ name                fcs       /firqtst/
 dev                 fcs       "/FT0"
 msg1                fcc       "FIRQs in 100 ticks: "
 msg1len             equ       *-msg1
+msg1q               fcc       "FIRQs in 20 ticks: "
+msg1qlen            equ       *-msg1q
 msg2                fcc       "FIRQs in user state: "
 msg2len             equ       *-msg2
 intact              fcc       ", registers intact"
@@ -60,7 +69,19 @@ broken              fcc       ", CORRUPTED"
 brokenlen           equ       *-broken
 pow                 fdb       10000,1000,100,10,1
 
-start               leax      dev,pcr
+start               ldd       #100      the full test ...
+                    std       ticks,u
+                    lda       #4
+                    sta       passes,u
+                    lda       ,x        ... or "q"
+                    anda      #$DF      either case
+                    cmpa      #'Q
+                    bne       full@
+                    ldd       #20
+                    std       ticks,u
+                    lda       #1
+                    sta       passes,u
+full@               leax      dev,pcr
                     lda       #READ.
                     os9       I$Open
                     lbcs      exit
@@ -68,20 +89,25 @@ start               leax      dev,pcr
 
 * ---- system state: across F$Sleep ---------------------------------------
                     lbsr      Count0    before := the count
-                    ldx       #100
+                    ldx       ticks,u
                     os9       F$Sleep
                     lbsr      Delta     count := the count - before
                     leay      buf,u
                     leax      msg1,pcr
                     ldb       #msg1len
-                    lbsr      Copy
+                    lda       passes,u
+                    cmpa      #1
+                    bne       m1@
+                    leax      msg1q,pcr
+                    ldb       #msg1qlen
+m1@                 lbsr      Copy
                     lbsr      Decimal
                     lbsr      Emit
 
 * ---- user state: across a busy loop -------------------------------------
                     lbsr      Count0
+                    lda       passes,u
                     pshs      u
-                    lda       #4
                     pshs      a         the outer count, on the stack
                     ldy       #$1234    +4 x 262,144 wraps back to $1234
                     ldu       #$4321    -1 x 262,144 wraps back to $4321
