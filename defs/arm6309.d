@@ -45,12 +45,25 @@ ARM6309.D           SET       1
 arm6309             SET       1         conditional assembly symbol
 
 ********************************************************************
-* The system tick is the video card's vertical blank (machine.md 4).
-* 70.086 Hz in VMODE 00 and 10, 59.940 Hz in 01 and 11; the boot ROM
-* leaves VMODE 00.  NOTE: TkPerSec is an assembly-time constant in the
-* Level 2 clock, so a VMODE family change today makes the clock run
-* 14 % slow.  docs/nitros9-av-plan.md X4.
+* The system tick is the video card's vertical blank (machine.md 4):
+* 25,175,000 / (800 x 449) = 70.086 Hz in VMODE 00 and 10, and
+* 25,175,000 / (800 x 525) = 59.940 Hz in 01 and 11.  Neither is an
+* integer, and a program can change VMODE, so the clock does not count
+* TkPerSec ticks to the second.  Each tick adds its own length in 2^-20 s
+* to a 24-bit accumulator, choosing the length from CTRL's VMODE0 as it
+* acknowledges the tick (level2/modules/clock.asm):
+*   Tk.P449 = 2^20 x 800 x 449 / 25,175,000 = 14,961.4 -> 14,961  (-2.5 s/day)
+*   Tk.P525 = 2^20 x 800 x 525 / 25,175,000 = 17,493.4 -> 17,493  (-2.0 s/day)
+* against a 50 ppm crystal's 4.3 s/day.  TkPerSec stays for what counts
+* ticks rather than seconds (F$Sleep's callers, D.Tick), at the family the
+* boot ROM leaves.
 TkPerSec            SET       70
+Tk.P449             EQU       14961
+Tk.P525             EQU       17493
+* The accumulator and the period live in os9.d's GIME video shadows, which
+* nothing on this machine has: D.VIDMD-D.VIDRS and D.BORDR-D.VOFF2.
+D.TkPer             EQU       D.VIDMD   2 bytes: this tick's length, 2^-20 s
+D.TkAcc             EQU       D.BORDR   3 bytes: the second so far, 2^-20 s
 
 HW.Page             SET       $FF       device descriptor hardware page
 IO.Base             EQU       $FF00     the I/O page

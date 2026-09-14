@@ -90,6 +90,18 @@ SvcIRQ
 Busy@               lda       >Video.Base+V.VSTAT
                     bmi       Busy@
                     sta       >Video.Base+V.VSTAT acknowledge
+* This tick's length follows VMODE0 (graphics.md 6.2): the 449-line family
+* is 70.086 Hz and the 525-line family 59.940 Hz.  CTRL reads back the last
+* byte the CPU wrote, and SPANBUSY has just been waited out, so the read is
+* the register file's and not a span's colour (graphics.md 19 item 39).
+* Choosing per tick means a VMODE change needs no call into the clock: the
+* tick that follows it is simply the new length.
+                    lda       >Video.Base+V.CTRL
+                    lsra                C = VMODE0
+                    ldd       #Tk.P449  (LDD leaves C alone)
+                    bcc       Per@
+                    ldd       #Tk.P525
+Per@                std       <D.TkPer
                     bra       YesClock
 NotClock
                     else
@@ -143,10 +155,33 @@ virqent             ldx       ,y++
 
 KbdCheck            jsr       [>D.AltIRQ] update keyboard/mouse/etc.
 
+                    ifne      arm6309
+* The second is kept in 2^-20 s: each tick adds its own length, D.TkPer,
+* to the 24-bit D.TkAcc, and a second passes when that reaches $100000.
+* So neither 70.086 nor 59.940 ticks has to be an integer, and a VMODE
+* family change moves the rate and not the time (defs/arm6309.d).
+                    dec       <D.Tick   kept counting, for anything that reads it
+                    ldd       <D.TkAcc+1
+                    addd      <D.TkPer
+                    std       <D.TkAcc+1
+                    lda       <D.TkAcc
+                    adca      #0
+                    cmpa      #$10      a second?
+                    blo       NoSec@
+                    suba      #$10
+                    sta       <D.TkAcc
+                    lda       #TkPerSec
+                    sta       <D.Tick
+                    bra       Second
+NoSec@              sta       <D.TkAcc
+                    lbra      VIRQend
+Second
+                    else
                     dec       <D.Tick   end of second?
                     bne       VIRQend   no, skip time update
                     lda       #TkPerSec reset tick count
                     sta       <D.Tick
+                    endc
 
                     inc       <D.Sec    increment second
                     lda       <D.Sec
@@ -305,6 +340,11 @@ F.STime             equ       *
                     bsr       STime.Mv
                     lda       #TkPerSec
                     sta       <D.Tick
+                    ifne      arm6309
+                    clr       <D.TkAcc  the second starts now
+                    clr       <D.TkAcc+1
+                    clr       <D.TkAcc+2
+                    endc
 
                     ldx       <D.Clock2 call Clock2 SetTime
                     jsr       $06,x
@@ -352,6 +392,8 @@ Busy@               lda       >Video.Base+V.VSTAT
                     lda       >Video.Base+V.CTRL
                     ora       #%01000000
                     sta       >Video.Base+V.CTRL
+                    ldd       #Tk.P449  SvcIRQ sets it from VMODE0 every tick
+                    std       <D.TkPer
                     else
 * Enable the 50Hz tick timer
                     lda       #$01      bit 0 = enable

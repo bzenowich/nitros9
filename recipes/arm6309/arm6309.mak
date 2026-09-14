@@ -60,7 +60,7 @@ CMDS_MERGED = shell
 # Loadable modules in /DD/MODULES: the FIRQ stub's test (driver + /FT0), and
 # its command in CMDS.
 MODULES = firqtst
-CMDS += firqtst
+CMDS += firqtst vmodetst
 SHELLMODS = shellplus echo iniz link load save unlink
 
 ROM      ?= arm6309_rom.bin
