@@ -181,7 +181,11 @@ InstStr             equ       *
                     ifne      picothing
                     fcc       "Pico-Thing"
                     else
+                    ifne      arm6309
+                    fcc       "arm6309"
+                    else
                     fcc       "Unknown Machine"
+                    endc                          match IFNE arm6309
                     endc                          match IFNE picothing
                     endc                          match IFNE wildbits
                     endc                          match IFNE corsham

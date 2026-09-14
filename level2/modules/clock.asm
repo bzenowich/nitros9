@@ -3,6 +3,7 @@
 *
 * Two hardware variants selected by the port symbol:
 *   picothing : the Pico-Thing 50Hz tick timer (no GIME, always polls)
+*   arm6309   : the video card's vertical blank, polled the same way
 *   otherwise : the CoCo3 GIME VSYNC clock
 *
 * The Pico-Thing has no GIME, so the standard GIME clock (which gates
@@ -10,7 +11,7 @@
 * variant uses a simple tick timer and polls every tick instead.
 ********************************************************************
 
-                    ifne      picothing
+                    ifne      picothing+arm6309
 ********************************************************************
 * clock_picothing - Clock module for Pico-Thing Level 2
 *
@@ -24,8 +25,13 @@
 *     1    2025       Initial version for Pico-Thing
 *     2    2026/03/08 Replaced MC6840 PTM with simple tick timer
 
+                    ifne      arm6309
+                    nam       clock_arm6309
+                    ttl       Clock for arm6309 Level 2
+                    else
                     nam       clock_picothing
                     ttl       Clock for Pico-Thing Level 2
+                    endc
 
 TkPerTS             equ       2         ticks per time slice
 
@@ -69,8 +75,27 @@ NewSvc              fcb       F$Time
 * Reading TICK.Stat both tests and acknowledges the timer IRQ.
 *
 SvcIRQ
+                    ifne      arm6309
+* arm6309: the tick is the video card's vertical blank (machine.md 4,
+* graphics.md 12).  VSTAT b0 is VBL pending AND enabled; any write to
+* VSTAT acknowledges it.  graphics.md 19 item 39: no register write while
+* SPANBUSY (b7), because the register file's address is the span's
+* colour select - so wait it out (at most 40.7 us of a 256-pixel span).
+* NOTE: Nothing checks LRUN: no display list runs under NitrOS-9 yet, and
+* the rule that one must END before VSYNC belongs to VidCore
+* (docs/nitros9-av-plan.md 3.4).
+                    lda       >Video.Base+V.VSTAT
+                    bita      #VSTAT.VBL
+                    beq       NotClock
+Busy@               lda       >Video.Base+V.VSTAT
+                    bmi       Busy@
+                    sta       >Video.Base+V.VSTAT acknowledge
+                    bra       YesClock
+NotClock
+                    else
                     lda       >TICK.Stat read and acknowledge tick timer
                     bmi       YesClock  bit 7 set = tick timer fired
+                    endc
 
                     leax      DoPoll,pcr not clock IRQ, poll other sources
                     lda       #$FF
@@ -317,9 +342,21 @@ LinkOk              sty       <D.Clock2 save Clock2 entry point
                     pshs      cc        save IRQ enable status
                     orcc      #IntMasks disable interrupts
 
+                    ifne      arm6309
+* Enable the video card's VBL interrupt, CTRL b6.  CTRL reads back the
+* last byte the CPU wrote (graphics.md 13's register file) unless a span
+* is running, so wait out SPANBUSY first; the boot ROM leaves the rest of
+* CTRL as the display it drew.
+Busy@               lda       >Video.Base+V.VSTAT
+                    bmi       Busy@
+                    lda       >Video.Base+V.CTRL
+                    ora       #%01000000
+                    sta       >Video.Base+V.CTRL
+                    else
 * Enable the 50Hz tick timer
                     lda       #$01      bit 0 = enable
                     sta       >TICK.Ctrl start tick timer
+                    endc
 
                     ldd       #59*256+TkPerTS trigger RTC read soon
                     std       <D.Sec    will prompt Clock2 read at next timeslice

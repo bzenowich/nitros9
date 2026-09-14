@@ -217,6 +217,10 @@ cont5@ stb <TxFloCtl save flags
  anda #~INT_UART
  sta INT_MASK_1
  else
+ ifne arm6309
+* arm6309: the 16550's INTR is an open-drain /IRQ on the backplane with
+* nothing to unmask (machine.md 4); F$IRQ above is all it needs.
+ else
 * CoCo: set MPI select
  orcc #IntMasks
  lda >MPISlot,pcr
@@ -232,6 +236,7 @@ cont6@ lda >PIA1Base+3 fetch PIA1 CR B
  ora #$01 enable GIME *CART IRQ
  sta >D.IRQER save it to the system...
  sta >IrqEnR ...and the GIME itself.
+ endc
  endc
  endc
 * Enable all 16550 IRQ sources *except* transmitter empty
@@ -1123,6 +1128,10 @@ brate macro
 *
 * Deek's convenience macro assists with easy conversion.
 BaudTable
+ ifne arm6309
+* 7.3728 MHz crystal - arm6309 (io/serial/docs/serial.md 5)
+ClkRate set 7372800
+ else
  ifne wildbits
 * 25.175 MHz crystal - Wildbits
 ClkRate set 25175000
@@ -1134,6 +1143,7 @@ ClkRate set 18432000
  endc
 * 29.4912 MHz crystal - Zippsterzone MegaMiniMPI - Deek's experimental settings
 ClkRate set 29491200
+ endc
  endc
 
  brate 110,1

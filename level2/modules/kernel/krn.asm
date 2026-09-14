@@ -54,8 +54,8 @@ Revision            set       00        ; module revision
 Edition             set       20        ; module Edition
 
 * The absolute address of where Kernel starts in memory.
-                  IFNE    picothing ; begin conditional assembly for picothing
-Where               equ       $EC00     ; picothing
+                  IFNE    picothing+arm6309 ; begin conditional assembly for picothing, arm6309
+Where               equ       $EC00     ; picothing, arm6309
                   ELSE
                   IFNE    wildbits ; begin conditional assembly for wildbits
 Where               equ       $EE00     ; wildbits
@@ -737,7 +737,7 @@ l@                  sta       ,x+       ; mark them all
 * ASSUME: however we got here, B=0
 Mc09KrnStart
                     ldx       #Bt.Start ; start address of the boot track in memory
-                  IFNE    picothing ; begin conditional assembly for picothing
+                  IFNE    picothing+arm6309 ; begin conditional assembly for picothing, arm6309
                     lda       #22       scan $E800-$FE00 (modules extend past $FA00)
                   ELSE
                     lda       #18       ; size of the boot track is $1800
@@ -1398,6 +1398,15 @@ KrnBank             lda       ,u++      ; get a bank
                     dec       ,s        ; done?
                   ENDC
                     bne       KrnBank   ; no, keep going
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* arm6309 has no constant page: slot 7 must be the kernel's block in the
+* hardware whatever the image says, or the vector stubs and SWIStack vanish
+* on the task switch.  A process image can legitimately hold DAT.Free there
+* (the ffreehb guard keeps slot 7 from being handed out, but image rebuilds
+* such as F$Chain's do not restore it), so force it as the Pico-Thing does.
+                    ldb       #KrnBlk   ; the kernel's block
+                    stb       -1,x      ; X points past slot 7's register
+                  ENDC
                   IFEQ    H6309   ; begin conditional assembly for H6309
 * 6809 - 10 cyc down to 8
 *                   leas      1,s                 eat temporary stack
@@ -1423,6 +1432,29 @@ KrnTail             equ       $0F7F
 CrashDump           fill      255,KrnTail-*  ; pad up to the tail (computed at assembly time)
                   ENDC
 *]]] Wildbits PORT
+
+*[[[ arm6309 PORT
+                  IFNE    arm6309 ; begin conditional assembly for arm6309
+* The boot ROM's vectors at $FFF2-$FFFD point at $FEEE-$FEFD, the CoCo 3
+* addresses, and there is no constant page: KrnBlk is slot 7 of every map.
+* So the kernel must END at $FF00 exactly, which puts SWIStack at $FEDF
+* ($FEDD on a 6309) and the BRA stubs at $FEEE.  The pad is computed from
+* the tail's own length, so code added above needs no hand-kept count; if
+* the kernel outgrows $EC00-$FEFF the count goes negative and the assembly
+* fails instead of moving the stubs.
+* The tail's code length is a constant because the pad cannot depend on
+* labels after it; ArmTailChk below fails the assembly if it is wrong.
+                  IFNE    H6309
+ArmTailStk          equ       16        R$Size, "REGISTER STACK63"
+ArmTailLen          equ       $54       FIRQVCT to ArmTailEnd
+                  ELSE
+ArmTailStk          equ       14        R$Size, "REGISTER STACK"
+ArmTailLen          equ       $5B       FIRQVCT to ArmTailEnd
+                  ENDC
+ArmTail             equ       ($FF00-Where)-3-ArmTailStk-1-18-ArmTailLen
+ArmPad              fill      255,ArmTail-*  ; pad up to the tail
+                  ENDC
+*]]] arm6309 PORT
 
 * Execute FIRQ vector (called from $FEF4)
 FIRQVCT             ldx       #D.FIRQ   ; get the DP offset of the vector
@@ -1543,6 +1575,13 @@ SWIVCT              ldx       #D.SWI    ; get the DP offset of the vector
 * Execute NMI vector (called from $FEFD)
 NMIVCT              ldx       #D.NMI    ; get the DP offset of the vector
                     bra       KrnFasterClrXxxx ; go execute it
+                  IFNE    arm6309
+ArmTailEnd          equ       *         ; end of the constant-page tail's code
+* A wrong ArmTailLen would move the stubs off $FEEE: fail the assembly.
+                  IFNE    ArmTailEnd-FIRQVCT-ArmTailLen
+                    error     ArmTailLen is wrong: the vector stubs would miss $FEEE
+                  ENDC
+                  ENDC
 
 * The end of the kernel module is here
                     emod

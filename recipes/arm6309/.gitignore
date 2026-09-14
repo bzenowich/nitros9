@@ -1,0 +1,7 @@
+# build products of the arm6309 recipes
+arm6309_rom.bin
+romdisk.dsk
+rel_arm6309
+os9kernel
+bootfile
+build.log
