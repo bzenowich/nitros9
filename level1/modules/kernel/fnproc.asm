@@ -71,9 +71,25 @@ FNProc
                     stx       <D.Proc   ; save it as current
                     lds       <D.SysStk ; get system stack pointer
                     andcc     #^IntMasks ; re-enable IRQ's (to allow pending one through)
+                  IFNE    arm6309
+                    bra       FNprocShutOffInts ; past the idle work and the wait
+                  ELSE
                     fcb       $8C       ; skip the next 2 bytes
+                  ENDC
 
-FNprocReEnblIrqs    cwai      #^IntMasks ; re-enable IRQ's and wait for one
+FNprocReEnblIrqs    equ       *
+                  IFNE    arm6309
+* arm6309: nothing to run, so the video console's idle work first - moving
+* the mouse pointer, which is too long for an IRQ service.  D.VBLSt is its
+* globals (defs/arm6309.d); the second vector there is the idle routine,
+* called with IRQs masked.  Carry set: it did work, so look at the queue again.
+                    ldx       <D.VBLSt
+                    beq       FNprocIdleWait
+                    jsr       [2,x]
+                    bcs       FNprocShutOffInts
+FNprocIdleWait      equ       *
+                  ENDC
+                    cwai      #^IntMasks ; re-enable IRQ's and wait for one
 FNprocShutOffInts   orcc      #IntMasks ; shut off interrupts again
                     lda       #Suspend  ; get suspend suspend state flag
                     ldx       #D.AProcQ-P$Queue ; for start of loop, setup to point to current process

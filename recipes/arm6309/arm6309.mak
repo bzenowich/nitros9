@@ -44,11 +44,19 @@ LFLAGS += -L$(LIBDIR) $(LINK_LIB) -lnet -lalib $(LFLAGS_EXTRA)
 
 RBF   = rbf.mn rbromdisk.dr dd_romdisk.dd r0_romdisk.dd
 SCF   = scf.mn sc16550.dr term_16550.dt nil.dr nil.dd
+# the video console (arm6309 docs/nitros9-av-plan.md): the driver, the keyboard
+# and the windows are in the system map; CoArm is loaded from CMDS into a
+# task of its own, so it is not (defs/armvid.d)
+VIDEO = armio.dr kbdarm w1.dd w2.dd w3.dd w4.dd
 PIPE  = pipeman.mn piper.dr pipe.dd
 CLOCK = clock clock2_soft
 
-BOOTFILE = krnp2 krnp3_perr init ioman $(RBF) $(SCF) $(PIPE) $(CLOCK) \
-           sysgo shell $(BOOTMODS_EXTRA)
+# ⚠ The shell is not in the bootfile: SysGo forks it from /DD/CMDS.  The 64 K
+# system map is the bootfile, system memory and every driver a program attaches
+# later, and with the video console in the bootfile a device loaded after boot
+# (firqtst's /FT0) found no free slot to be mapped into
+BOOTFILE = krnp2 krnp3_perr init ioman $(RBF) $(SCF) $(VIDEO) $(PIPE) $(CLOCK) \
+           sysgo $(BOOTMODS_EXTRA)
 
 CMDS = attr backup build cmp copy date dcheck debug ded deiniz del deldir \
        devs dir dirsort display dmem dmode dump echo error free help ident \
@@ -60,7 +68,7 @@ CMDS_MERGED = shell
 # Loadable modules in /DD/MODULES: the FIRQ stub's test (driver + /FT0), and
 # its command in CMDS.
 MODULES = firqtst
-CMDS += firqtst vmodetst ps2tst memtst reboot
+CMDS += firqtst vmodetst ps2tst memtst reboot coarm libvid rastbar wave overworld
 SHELLMODS = shellplus echo iniz link load save unlink
 
 ROM      ?= arm6309_rom.bin
@@ -95,6 +103,18 @@ $(MODDIR)/pwd: pd.asm | $(MODDIR)
 	$(AS) $(AFLAGS) $< $(ASOUT)$@ -DPWD=1
 $(MODDIR)/pxd: pd.asm | $(MODDIR)
 	$(AS) $(AFLAGS) $< $(ASOUT)$@ -DPXD=1
+$(MODDIR)/w1.dd: armwin.asm | $(MODDIR)
+	$(AS) $(AFLAGS) -DWN=1 $< $(ASOUT)$@
+$(MODDIR)/w2.dd: armwin.asm | $(MODDIR)
+	$(AS) $(AFLAGS) -DWN=2 $< $(ASOUT)$@
+$(MODDIR)/w3.dd: armwin.asm | $(MODDIR)
+	$(AS) $(AFLAGS) -DWN=3 $< $(ASOUT)$@
+$(MODDIR)/w4.dd: armwin.asm | $(MODDIR)
+	$(AS) $(AFLAGS) -DWN=4 $< $(ASOUT)$@
+$(addprefix $(MODDIR)/,$(VIDEO) coarm libvid rastbar wave overworld): $(DEFSDIR)/armvid.d
+$(MODDIR)/coarm: vidcore.asm coarmfont.asm ca_scr.asm ca_text.asm ca_bmtx.asm ca_draw.asm ca_gpb.asm ca_row.asm ca_ptr.asm ca_list.asm ca_tile.asm ca_ext.asm vidptr.asm
+$(MODDIR)/armio.dr: vidptr.asm vidcore.asm
+$(MODDIR)/armio.dr: vidsvc.asm vidxcl.asm
 $(MODDIR)/firqtst.dr: firqtstdrv.asm | $(MODDIR)
 	$(AS) $(AFLAGS) $< $(ASOUT)$@
 $(MODDIR)/ft0.dd: firqtstdesc.asm | $(MODDIR)
@@ -119,7 +139,12 @@ os9kernel: $(MODDIR)/boot_romdisk $(MODDIR)/krn
 rel_arm6309: rel_arm6309.asm os9kernel
 	$(ASROM) $(AFLAGS) $< $(ASOUT)$@
 
-$(ROMDSK): bootfile $(addprefix $(MODDIR)/,$(CMDS) $(CMDS_MERGED)) $(addprefix modules_,$(MODULES))
+# SYSFILES: binary files for /DD/SYS, given by the caller (arm6309's
+# software/nitros9/mkrom.sh passes the scripted clients' byte streams)
+SYSFILES ?=
+
+$(ROMDSK): bootfile $(addprefix $(MODDIR)/,$(CMDS) $(CMDS_MERGED)) $(addprefix modules_,$(MODULES)) $(SYSFILES)
+	@test $$(wc -c < $(MODDIR)/coarm) -le 16384 || { echo "FAIL coarm is more than the two blocks ArmIO maps it in (defs/armvid.d Co.Code)"; exit 1; }
 	$(RM) $@
 	$(OS9FORMAT) -q -l$(ROMDSK_SECTORS) $@ -n"NitrOS-9/$(CPU) Level 2 arm6309"
 	$(OS9GEN) $@ -b=bootfile
@@ -131,6 +156,7 @@ $(ROMDSK): bootfile $(addprefix $(MODDIR)/,$(CMDS) $(CMDS_MERGED)) $(addprefix m
 	$(OS9ATTR_EXEC) $(foreach m,$(MODULES),$@,MODULES/$(m))
 	$(MAKDIR) $@,SYS
 	$(CPL) $(L1D)/sys/errmsg $@,SYS/errmsg
+	$(foreach f,$(SYSFILES),$(OS9COPY) $(f) $@,SYS/$(notdir $(f));)
 	$(CPL) $(STARTUP) $@,startup
 	$(OS9ATTR_TEXT) $@,startup
 

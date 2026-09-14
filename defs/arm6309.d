@@ -72,6 +72,14 @@ Tk.P525             EQU       17493
 * nothing on this machine has: D.VIDMD-D.VIDRS and D.BORDR-D.VOFF2.
 D.TkPer             EQU       D.VIDMD   2 bytes: this tick's length, 2^-20 s
 D.TkAcc             EQU       D.BORDR   3 bytes: the second so far, 2^-20 s
+* The video console's globals (defs/armvid.d's VG), or 0.  When set, the
+* clock hands each VBL to the service at their offset 0 instead of
+* acknowledging it itself: jsr [,x] with X = the globals, in the IRQ, and
+* the service returns carry = VMODE0 of the CTRL it last wrote.  The kernel's
+* idle loop calls jsr [2,x] with IRQs masked, for work too long for an IRQ
+* (the mouse pointer); carry set if it did some.  It is
+* os9.d's D.VOFF1-D.VOFF0, GIME shadows nothing here has.
+D.VBLSt             EQU       D.VOFF1
 
 HW.Page             SET       $FF       device descriptor hardware page
 IO.Base             EQU       $FF00     the I/O page
@@ -124,6 +132,19 @@ V.VSTAT             EQU       $13       b7 SPANBUSY, b6 VBLANK, b5 HBLANK, b4 LR
 VSTAT.Busy          EQU       %10000000
 VSTAT.LRun          EQU       %00010000
 VSTAT.VBL           EQU       %00000001
+
+* The video console's status calls (arm6309 docs/nitros9-av-plan.md 5.3), on
+* a window path; defs/armvid.d has the tables they take
+SS.Excl             EQU       $D4       Set: Y = 1 claim the displayed screen, 0 release; X := the card's base
+SS.Scroll           EQU       $D5       Set: X = HSCROLL, Y = VSCROLL, at the next VBL (exclusive)
+SS.Batch            EQU       $D7       Set: X = a batch (BT.*), Y = its length: committed in one VBL
+SS.FrmSig           EQU       $D8       Set: X = the signal, Y = every n frames (0: off)
+SS.FrmWait          EQU       $D9       Set: sleep until a VBL is served; X := frames served
+SS.Raster           EQU       $DA       Set: X = a list table (RT.*): the screen's list from the next frame
+SS.RastOff          EQU       $DB       Set: no list
+SS.TileLd           EQU       $DC       Set: X = 16,384 bytes, Y = the bank (TILEBASE value)
+SS.MapWr            EQU       $DD       Set: X = a map rectangle (MW.*), Y = its length
+SS.TBank            EQU       $DE       Set: X = TILEBASE, at the next VBL
 
 ********************************************************************
 * /FIRQ (krn.asm's ArmFIRQ).  The audio card is the only source

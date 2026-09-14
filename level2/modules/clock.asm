@@ -81,12 +81,28 @@ SvcIRQ
 * VSTAT acknowledges it.  graphics.md 19 item 39: no register write while
 * SPANBUSY (b7), because the register file's address is the span's
 * colour select - so wait it out (at most 40.7 us of a 256-pixel span).
-* NOTE: Nothing checks LRUN: no display list runs under NitrOS-9 yet, and
-* the rule that one must END before VSYNC belongs to VidCore
-* (docs/nitros9-av-plan.md 3.4).
+* Once the video console is up it owns the card (docs/nitros9-av-plan.md
+* 3.4): D.VBLSt is its globals, and its service waits out the span,
+* acknowledges, commits the frame batch and says which family CTRL is in.
+* ⛔ Nothing here may use the stack: this runs from the vector, on the
+* interrupted code's S in the system map, before the kernel's XIRQ moves to
+* the system stack.  So the VBL is only recognised here, and served in
+* VBLTick, which the kernel calls through D.SvcIRQ on the system stack.
                     lda       >Video.Base+V.VSTAT
                     bita      #VSTAT.VBL
                     beq       NotClock
+                    leax      VBLTick,pcr
+                    clr       <D.QIRQ   flag as clock IRQ
+                    lbra      ContIRQ
+
+* VBLTick - the kernel's service call for a VBL, system state and stack
+VBLTick             ldx       <D.VBLSt
+                    beq       Busy@
+                    jsr       [,x]      C = VMODE0
+                    ldd       #Tk.P449  (LDD leaves C alone)
+                    bcc       Per@
+                    ldd       #Tk.P525
+                    bra       Per@
 Busy@               lda       >Video.Base+V.VSTAT
                     bmi       Busy@
                     sta       >Video.Base+V.VSTAT acknowledge
@@ -102,7 +118,7 @@ Busy@               lda       >Video.Base+V.VSTAT
                     bcc       Per@
                     ldd       #Tk.P525
 Per@                std       <D.TkPer
-                    bra       YesClock
+                    jmp       [>D.VIRQ] the tick itself
 NotClock
                     else
                     lda       >TICK.Stat read and acknowledge tick timer
@@ -229,8 +245,20 @@ DoPollLp            jsr       [>D.Poll] call poll routine
                     bcs       DoPollDn  no device found, done polling
                     incb                at least one device was serviced
                     bra       DoPollLp  check for more
+                    ifne      arm6309
+* arm6309: TST leaves C alone, and C here is D.Poll's "none found", so it is
+* set explicitly: clear if a device was serviced, or the kernel takes the
+* IRQ for unclaimed and returns to the interrupted code with IRQs masked.
+DoPollDn            tstb                any device serviced?
+                    beq       DoPollNo
+                    andcc     #^Carry   yes
+                    puls      b,pc
+DoPollNo            orcc      #Carry    no
+                    puls      b,pc
+                    else
 DoPollDn            tstb                any device serviced?
                     puls      b,pc      return; carry clear if serviced
+                    endc
 
 *
 * No hardware toggle needed (no GIME on Pico-Thing)
