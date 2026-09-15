@@ -11,9 +11,9 @@
 * CoCo 3 key values: the arrows are $0C $0A $08 $09, Esc is BREAK $05,
 * F1 and F2 are $B1 and $B2).
 *
-* The mouse port too (plan P2's MseArm, folded in: the two ports share the
-* card's one IRQEN and one service): initialised by 11.2, its 3-byte
-* packets move VG.MsX, VG.MsY and VG.MsBtn, and through ArmIO the pointer.
+* The mouse port too (plan P2's MseArm, folded in: one service for both
+* ports): initialised by 11.2, its 3-byte packets move VG.MsX, VG.MsY and
+* VG.MsBtn, and through ArmIO the pointer.
 *
 * What it does not do: LEDs (a transmit masks /IRQ for ~2 ms a byte, ps2.md
 * 7.1, so Caps Lock's state is kept and not shown), typematic, and the
@@ -61,12 +61,12 @@ KF.Alt              equ       %00010000
 
 KF.Caps             equ       %00100000
 
-* Both ports' ready bits.  ⚠ IRQEN is one bit for the whole card, so a
-* byte waiting on the mouse port raises /IRQ as surely as a key: a service
-* that took only KDR left MDR's power-on bytes (AA 00) holding the line,
-* IOMan's poll found no one to claim it, and the kernel went back from the
-* IRQ with interrupts masked - found on the first run.  Until MseArm (plan
-* P2) the mouse's bytes are read and dropped.
+* Both ports' ready bits, and both ports' enables (IOCTRL b6 KIRQEN, b7
+* MIRQEN, ps2.md 3.1).  The card had one enable for both until 2026-09-14,
+* and a service that took only KDR left MDR's power-on bytes (AA 00) holding
+* the line: IOMan's poll found no one to claim it, and the kernel went back
+* from the IRQ with interrupts masked - found on the first run.  A driver
+* for one port now enables that port alone.
 IRQPkt              fcb       0         flip: a ready bit reads 1 when a byte waits
                     fcb       %00000011 mask: KDR and MDR
                     fcb       $F0       priority
@@ -115,15 +115,15 @@ irq@                clr       VG.KbPort,u
                     leay      Svc,pcr
                     os9       F$IRQ
                     bcs       x@
-                    lda       VG.IOCtl,u IRQEN
-                    ora       #%01000000
+                    lda       VG.IOCtl,u KIRQEN and MIRQEN: both ports are serviced
+                    ora       #%11000000
                     lbsr      PutCtl
 x@                  clrb
                     rts
 
 * Term - U = VG
 Term                lda       VG.IOCtl,u
-                    anda      #^%01000000
+                    anda      #^%11000000
                     lbsr      PutCtl
                     ldx       #0
                     leay      Svc,pcr

@@ -15,10 +15,11 @@
 *   V4  the register file reads back the last write, but not under a span
 *       or a list: every register the system writes is shadowed in VG
 *   V5  VBL is acknowledged by any write to VSTAT, under V1 - VcSvc
-*   V6  palette commits snow: only VcSvc commits, 16 entries a blank
+*   V6  retired: the card posts a CPU's palette commit to the next HLOAD, so
+*       VcPal writes it from the main line and waits on VSTAT b1
 *   V7  each scroll pair is written whole, by VcSvc, inside VBLANK
-*   V8  a VMODE family change is written just after VBLANK falls - VcVMode,
-*       from the main line, so the VBL service never waits for it
+*   V8  retired: the card takes a VMODE family change where the frame ends
+*       (graphics.md 6.2), so CTRL goes in the batch like everything else
 *   V11 the tick follows VMODE0: VcSvc returns it in carry for the clock
 *   V12 SPANBUSY holds E: VcWait polls it rather than stall on VRAM
 *
@@ -51,15 +52,24 @@ VcPolls             equ       16384
 * VDATA writes per masked stretch
 VcChunk             equ       24
 
-* VcWait - SPANBUSY and LRUN both clear.  A = VSTAT; carry set if they
-* never cleared.  A span is waited out as it is, masked or not (40.7 us at
-* most); a display list runs most of a frame, so while LRUN is set the wait
-* opens /IRQ, and masks it again as the caller had it before looking again.
+* VcWait - SPANBUSY and LRUN both clear, and no list armed.  A = VSTAT;
+* carry set if they never cleared.  A span is waited out as it is, masked or
+* not (40.7 us at most); a display list runs most of a frame, so while LRUN
+* is set the wait opens /IRQ, and masks it again as the caller had it before
+* looking again.  A list the VBL service armed (VG.LArm) owns WPTR from its
+* GO in the blank, though LRUN is not set until the blank ends: that is
+* waited for the same way.
 VcWait              pshs      cc,x,u
                     ldu       VG.Base,y
                     ldx       #VcPolls
 w@                  lda       VR.VSTAT,u
-                    bita      #VSTAT.Busy+VSTAT.LRun
+                    tst       VG.LArm,y
+                    beq       n@
+                    bita      #VSTAT.VBlk
+                    bne       l@        armed and still in the blank: as a running list
+                    clr       VG.LArm,y the blank is over, so LRUN is set by now: look again
+                    bra       w@
+n@                  bita      #VSTAT.Busy+VSTAT.LRun
                     beq       ok@
                     bita      #VSTAT.LRun
                     bne       l@
@@ -74,6 +84,11 @@ p@                  leax      -1,x
                     lda       VR.VSTAT,u
                     bita      #VSTAT.LRun
                     bne       p@
+                    tst       VG.LArm,y (an armed list: to the blank's end)
+                    beq       d@
+                    bita      #VSTAT.VBlk
+                    bne       p@
+d@                  equ       *
                     lda       ,s        the caller's mask back, then look again
                     bita      #IRQMask
                     beq       w@
@@ -337,84 +352,44 @@ VcQFlag             ora       VG.BFlag,y
                     sta       VG.BFlag,y
                     puls      cc,a,pc
 
-* VcQPal - VG.Pal entries B .. B+A-1 (A = 0: 256) are to be committed,
-* merged with any range still pending.
-VcQPal              pshs      cc,d,x
-                    orcc      #IRQMask
-                    clra
-                    ldb       2,s       first
-                    tfr       d,x
-                    ldb       1,s       count
-                    bne       c@
-                    inca                0 is 256
-c@                  pshs      x
-                    addd      ,s++      D = end = first + count
-                    pshs      d
-                    lda       VG.BFlag,y
-                    bita      #BF.Pal
-                    beq       new@
-                    clra                merge with what is pending
-                    ldb       VG.PalLo,y
-                    pshs      d         the pending start
-                    addd      VG.PalN,y the pending end
-                    cmpd      2,s
-                    bls       e@
-                    std       2,s       end = the later
-e@                  tfr       x,d
-                    cmpd      ,s
-                    bls       s@
-                    ldx       ,s        start = the earlier
-s@                  leas      2,s
-new@                tfr       x,d
-                    stb       VG.PalLo,y
-                    pshs      d
-                    ldd       2,s
-                    subd      ,s++
-                    std       VG.PalN,y
-                    leas      2,s
-                    lda       VG.BFlag,y
-                    ora       #BF.Pal
-                    sta       VG.BFlag,y
-                    puls      cc,d,x,pc
-
-* VcVMode is CoArm's: it yields (CoFrame), which only CoArm can do
-                    ifdef     CoG
-* VcVMode - A = the VMODE bits CTRL is to hold.  In the same family nothing
-* is written: the caller queues CTRL.  A family change is written here, from
-* the main line, just after VBLANK falls (V8: vctrl.v's terminal-count decode
-* is partial): CoArm yields until a VBL has been served, which leaves it in
-* the blank, polls VBLANK with /IRQ open, and masks only for the write.  Not
-* in the blank when it wakes (a late wake), it waits for the next one: three
-* tries.
-VcVMode             pshs      d,x,u
-                    anda      #CT.VMode
-                    sta       ,s
-                    eora      VG.Ctrl,y
-                    bita      #1
-                    beq       x@
+* VcPal - VG.Pal entries B .. B+A-1 (A = 0: 256) onto the card, now, from
+* the main line.  The card posts a CPU's palette commit to the next HLOAD, the
+* blanked sync-and-back-porch window (graphics.md 13.1), so there is no snow
+* at any instant; VSTAT b1 (PBUSY) holds until PIDX has stepped, at most a
+* line, and each entry waits for it with /IRQ open.  PIDX is written for every
+* entry, since a display list's MOVEs step it too.
+VcPal               pshs      d,x,u
                     ldu       VG.Base,y
-                    lda       #3
-                    sta       1,s
-t@                  lbsr      CoFrame
-                    lda       VR.VSTAT,u
-                    bita      #VSTAT.VBlk
-                    bne       in@
-                    dec       1,s
-                    bne       t@
-in@                 ldx       #VcPolls
-f@                  lda       VR.VSTAT,u
-                    bita      #VSTAT.VBlk
-                    beq       w@
-                    leax      -1,x
-                    bne       f@
-w@                  pshs      cc
+                    clra
+                    ldb       ,s        the count: 0 is 256
+                    bne       c@
+                    inca
+c@                  tfr       d,x       X := entries to go
+e@                  pshs      cc
                     orcc      #IRQMask
-                    lbsr      VcWait
-                    lda       VG.Ctrl,y
-                    anda      #^CT.VMode
-                    ora       1,s
-                    sta       VG.Ctrl,y
-                    sta       VR.CTRL,u
+                    lbsr      VcWait    V1 and V2
+                    ldb       2,s       the entry
+                    stb       VR.PIDX,u
+                    clra
+                    lslb
+                    rola
+                    pshs      x
+                    leax      d,y
+                    ldd       VG.Pal,x  hi lo
+                    stb       VR.PDATL,u
+                    sta       VR.PDATH,u the commit, posted
+                    puls      x
                     puls      cc
-x@                  puls      d,x,u,pc
-                    endc
+                    inc       1,s
+                    pshs      x
+                    ldx       #VcPolls
+p@                  lda       VR.VSTAT,u
+                    bita      #VSTAT.PBusy
+                    beq       d@
+                    leax      -1,x
+                    bne       p@
+d@                  puls      x
+                    leax      -1,x
+                    bne       e@
+                    puls      d,x,u,pc
+

@@ -87,8 +87,7 @@ TlShow              pshs      d
                     ldd       #0
                     lbsr      VcQVScr
                     lbsr      VcQHScr
-                    lda       SC.VMode,x
-                    lbsr      VcVMode   a family change, written after VBLANK falls
+                    lda       SC.VMode,x the card changes family at a frame's end (H8)
                     ora       #CT.VIRQ+CT.Cell
                     pshs      a
                     lbsr      VcQCtrl
@@ -169,7 +168,7 @@ DoPal565            lbsr      NeedScr
                     lbsr      IsDisp
                     bne       x@
                     lda       #1
-                    lbsr      VcQPal
+                    lbsr      VcPal
 x@                  clrb
                     rts
 
@@ -218,7 +217,7 @@ lo@                 tfr       a,b
                     lbsr      IsDisp
                     bne       q@
                     lda       #1
-                    lbsr      VcQPal
+                    lbsr      VcPal
 q@                  puls      u
 n@                  ldd       WT.Parms+3,u
                     subd      #1

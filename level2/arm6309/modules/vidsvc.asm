@@ -3,14 +3,8 @@
 *
 * `use`d by ArmIO, in the system map: the service runs in the IRQ, and the
 * waits sleep, and CoArm - in a task of its own - can do neither.  The rules
-* it keeps are vidcore.asm's V1, V2, V5-V7 and V11.
+* it keeps are vidcore.asm's V1, V2, V5, V7 and V11.
 
-* Palette entries a blank commits: 16 is ~0.2 ms, and a whole palette in
-* sixteen blanks (0.23 s)
-VcPalPer            equ       16
-* Polls of VBLANK before a list's GO: the IRQ comes 12 lines into a 49-line
-* blank, so ~37 lines, ~140 polls, are left; this is the bound
-VcLPolls            equ       400
 *
 * Edt/Rev  YYYY/MM/DD  Modified by
 * Comment
@@ -62,14 +56,16 @@ ok@                 leas      1,s
 * in the IRQ, with X = VG, the system map and DP = 0; D, X, Y and U are
 * free.  It returns carry = VMODE0 of CTRL, for the tick's length.
 *
-* A batch is at most both scroll pairs, CTRL, the two bases and VcPalPer
-* palette entries: ~40 writes, plan 3.4's 0.5 ms with room.  Only the
-* palette carries to a later blank, and VG.PalCar counts the blanks it did.
-* ⚠ It never waits for VBLANK to fall (V8): that took 1.2 ms of the IRQ
-* on each family change, found by run-vid.sh's CALLTIME, and VcVMode does
-* it from the main line instead.  A CTRL queued with a different VMODE0 is
-* written at once.
+* A batch is at most both scroll pairs, CTRL and the two bases.  The
+* palette is not in it: the card posts a CPU's commit to the next HLOAD
+* (graphics.md 13.1), so VidCore writes it from the main line (VcPal).
+* A CTRL with a different VMODE0 is written like any other: the card takes
+* the family where the frame ends (vctrl's M0, graphics.md 6.2), and this
+* write is in the blank, before that end - so the frame this VBL closes was
+* the old family's, and the carry is VMODE0 as the service found it.
 VcSvc               tfr       x,y
+                    lda       VG.Ctrl,y the family of the frame this VBL ends, for the tick
+                    sta       VG.TkFam,y
                     ldu       VG.Base,y
                     ldx       #VcPolls
 s@                  lda       VR.VSTAT,u V1: out of any span
@@ -125,45 +121,10 @@ c@                  lda       VG.BFlag,y
 p@                  lda       VG.BFlag,y
                     anda      #^(BF.VScr+BF.HScr+BF.TBase+BF.MBase+BF.Ctrl)
                     sta       VG.BFlag,y
-                    bita      #BF.Pal   V6: VcPalPer entries this blank
-                    beq       done@
-                    ldb       VG.PalLo,y
-                    stb       VR.PIDX,u
-                    clra
-                    lslb
-                    rola
-                    leax      d,y
-                    leax      VG.Pal,x
-                    ldd       VG.PalN,y
-                    cmpd      #VcPalPer
-                    bls       n@
-                    ldd       #VcPalPer
-n@                  pshs      d
-                    ldd       VG.PalN,y
-                    subd      ,s
-                    std       VG.PalN,y
-                    lda       VG.PalLo,y
-                    adda      1,s
-                    sta       VG.PalLo,y
-pl@                 ldd       ,x++
-                    stb       VR.PDATL,u
-                    sta       VR.PDATH,u commits; PIDX steps
-                    dec       1,s
-                    bne       pl@
-                    leas      2,s
-                    ldd       VG.PalN,y
-                    bne       car@
-                    lda       VG.BFlag,y
-                    anda      #^BF.Pal
-                    sta       VG.BFlag,y
-                    bra       done@
-car@                ldd       VG.PalCar,y
-                    addd      #1
-                    std       VG.PalCar,y
 done@               lbsr      VcFSig
                     lbsr      VcGo
-                    lda       VG.Ctrl,y
-                    lsra                C = VMODE0
+                    lda       VG.TkFam,y
+                    lsra                C = VMODE0 of that frame
                     rts
 
 * VcBatch - SS.Batch's records (armvid.d BT.*), in the blank, in order.  A
@@ -282,12 +243,13 @@ VcFSig              lda       VG.FSPID,y
                     os9       F$Send
 x@                  rts
 
-* VcGo - the displayed screen's display list (SS.Raster), started as the
-* blank ends (plan 3.4.1 (a)): graphics.md 10.3.2's WAIT n is line n only
-* for a GO inside line 0.  So the service polls VBLANK with /IRQ masked,
-* ~1.2 ms a frame while a list is on.  A service that finds the blank
-* already over starts nothing this frame, and counts it.  The list takes
-* WPTR (V3), so the generation moves.
+* VcGo - the displayed screen's display list (SS.Raster), started from the
+* blank: the card holds a GO written while VBLANK is high and starts the
+* engine as the blank ends (graphics.md 10.3.1's armed GO), which is where
+* WAIT n is line n.  The list takes WPTR (V3), so the generation moves, and
+* VG.LArm tells the main line that WPTR is the list's until the blank ends
+* (VcWait).  A service that finds the blank already over starts nothing this
+* frame, and counts it.
 VcGo                tst       VG.LOn,y
                     beq       n@
                     lda       VG.LScr,y
@@ -296,14 +258,8 @@ VcGo                tst       VG.LOn,y
                     ldu       VG.Base,y
                     lda       VR.VSTAT,u
                     bita      #VSTAT.VBlk
-                    beq       late@
-                    ldx       #VcLPolls
-w@                  lda       VR.VSTAT,u
-                    bita      #VSTAT.VBlk
-                    beq       go@
-                    leax      -1,x
-                    bne       w@
-late@               ldd       VG.LLate,y
+                    bne       go@
+                    ldd       VG.LLate,y
                     addd      #1
                     std       VG.LLate,y
 n@                  clr       VG.MkPh,y
@@ -318,7 +274,8 @@ go@                 ldd       VG.LRow,y WPTR := row << 10, little-endian
                     stb       VR.WPTR1,u
                     sta       VR.WPTR2,u
                     lda       #1
-                    sta       VR.BCTRL,u GO
+                    sta       VR.BCTRL,u GO, armed to the blank's end
+                    sta       VG.LArm,y
                     inc       VG.PtrGen,y
                     ldd       VG.LTag,y
                     std       VG.MkPh,y

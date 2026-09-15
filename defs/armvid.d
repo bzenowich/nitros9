@@ -76,6 +76,7 @@ WM.Sprite           EQU       %00011000
 
 * VSTAT (V.VSTAT and VSTAT.* are in arm6309.d, for the clock)
 VSTAT.VBlk          EQU       %01000000
+VSTAT.PBusy         EQU       %00000010 a CPU palette commit posted or in flight (graphics.md 13.1)
 
 ********************************************************************
 * The PS/2 card (ps2.md 8), offsets from its base
@@ -177,8 +178,6 @@ VG.BVScr            RMB       2
 VG.BHScr            RMB       2
 VG.BTBase           RMB       1
 VG.BMBase           RMB       1
-VG.PalLo            RMB       1         the palette entries still to commit: PalN from PalLo
-VG.PalN             RMB       2
 * the pointer (vidptr.asm), drawn on the displayed bitmap screen
 VG.PtrOn            RMB       1         GCSet chose one
 VG.PtrVis           RMB       1         it is on the card
@@ -205,7 +204,6 @@ VG.MsPkt            RMB       32        SS.Mouse's packet (cocovtio.d's Pt.*)
 * counters
 VG.Frames           RMB       2         VBLs served
 VG.LRunV            RMB       2         VBLs that found a display list still running
-VG.PalCar           RMB       2         VBLs whose palette commit carried to the next
 VG.Pal              RMB       512       the displayed palette, RGB565 hi lo
 * display lists (SS.Raster): CoArm composes one, the VBL service starts it
 VG.LOn              RMB       1         start the list at VG.LRow each frame
@@ -214,6 +212,7 @@ VG.DScr             RMB       1         the displayed screen, + 1 (CoArm's CG.Di
 VG.LRow             RMB       2         the ring row it is in
 VG.LTag             RMB       2         its tag + 1, for VG.MkPh
 VG.LAlt             RMB       1         which of the two list rows is composed next
+VG.LArm             RMB       1         the service issued a GO this blank: WPTR is the list's until it ends
 VG.LLate            RMB       2         VBLs served too late in the blank to start it
 * frame signals (SS.FrmSig)
 VG.FSPID            RMB       1         the process, or 0
@@ -228,6 +227,7 @@ VG.XPID             RMB       1         the process that claimed it
 VG.XPtr             RMB       1         VG.PtrOn before the claim
 VG.CPID             RMB       1         the process making the call in progress (ArmIO's ToCo)
 * SS.Batch: the next VBL commits it
+VG.TkFam            RMB       1         the VBL service's: CTRL as it found it, for the tick's family
 VG.BtOn             RMB       1         a batch is waiting for the VBL
 VG.XEnd             RMB       2         ArmIO's scratch, under VG.CBusy (vidxcl.asm)
 VG.XRow             RMB       1
@@ -283,7 +283,6 @@ BF.HScr             EQU       %00000010
 BF.Ctrl             EQU       %00000100
 BF.TBase            EQU       %00001000
 BF.MBase            EQU       %00010000
-BF.Pal              EQU       %00100000
 
 * CoArm's calls (VG.CFn)
 CF.Boot             EQU       0         once, after the task is built: CoArm's own globals

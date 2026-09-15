@@ -347,8 +347,7 @@ t@                  lbsr      IsText
                     lbsr      TxShow    fast text: the font bank, the map, the palette, CTRL
                     bra       ptr@
 bm@                 lbsr      StoreToCard
-                    lda       SC.VMode,x
-                    lbsr      VcVMode   a family change, written after VBLANK falls
+                    lda       SC.VMode,x the card changes family at a frame's end (H8)
                     ora       #CT.VIRQ
                     pshs      a
                     lbsr      VcQCtrl
@@ -818,7 +817,7 @@ DoPalette           lbsr      NeedScr
                     lbsr      Prm
                     tfr       a,b
                     lda       #1
-                    lbsr      VcQPal
+                    lbsr      VcPal
 x@                  leas      2,s
                     clrb
                     rts
@@ -863,7 +862,7 @@ c@                  ldd       ,x++
                     leas      2,s
                     clra                256 from 0
                     clrb
-                    lbsr      VcQPal
+                    lbsr      VcPal
                     puls      d,x,u,pc
 
 * PalDef - X = a screen: CoWin's sixteen defaults, then RRRGGGBB

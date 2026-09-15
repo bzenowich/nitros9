@@ -365,8 +365,7 @@ p@                  clrb
                     lbsr      VcQVScr
                     ldd       #0
                     lbsr      VcQHScr
-                    lda       SC.VMode,x
-                    lbsr      VcVMode   a family change, written after VBLANK falls
+                    lda       SC.VMode,x the card changes family at a frame's end (H8)
                     ora       #CT.VIRQ+CT.Cell
                     pshs      a
                     lbsr      VcQCtrl

@@ -25,6 +25,12 @@
 * most 16 bytes: 32 measured 0.7 ms masked, and the VBL service's SS.Batch
 * may use WPTR between two calls.  D, X (as said) and CC change; Y and U do not.
 *
+* ⚠ libvid cannot see the video console's globals, so it does not know when
+* the VBL service has armed a display list (vidsvc.asm VcGo): the list owns
+* WPTR from that GO, in the blank, although LRUN is not set until the blank
+* ends.  An owner that also uses SS.Raster must not call libvid between a VBL
+* and the end of its blank.
+*
 * Not here yet: text, icons, polygons and images (gui.asm's text, icon,
 * poly and image).  The overworld test client needs none of them.
 *

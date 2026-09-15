@@ -8,11 +8,13 @@
 * that the clock's per-tick period (defs/arm6309.d) can be checked in both
 * timing families.  The rest of CTRL is kept from its read-back.
 *
-* graphics.md 13's rules, kept: nothing is written under SPANBUSY, and the
-* write lands just after VBLANK falls, the one instant at which changing the
-* line-count family cannot run a frame long (arm6309 docs/nitros9-av-plan.md
-* V8).  A user process cannot mask interrupts, so the window is found by
-* polling, and a VBL service that runs in between only acknowledges.
+* graphics.md 13's rules, kept: nothing is written under SPANBUSY.  The write
+* lands just after VBLANK falls, which the card no longer needs: it takes a
+* family change where the frame ends (graphics.md 6.2).  ⚠ So the frame this
+* write lands in is still the old family's, and the clock sizes its tick
+* from the new VMODE0: 2.3 ms of the clock, once.  A user process cannot
+* mask interrupts, so the window is found by polling, and a VBL service that
+* runs in between only acknowledges.
 *
 * Edt/Rev  YYYY/MM/DD  Modified by
 * Comment
