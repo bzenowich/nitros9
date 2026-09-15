@@ -53,13 +53,16 @@ name                fcs       /CoArm/
 CoG                 equ       Co.Data   CoArm's globals, in its own map
 
 * Entered by ArmIO's Flip with a full RTI frame: every register zero, the
-* call in VG.CFn.
-entry               lds       #Co.Stack
-                    ldy       #VG.Addr
+* call in VG.CFn.  /IRQ is open, and an IRQ taken here stacks on S.  So S
+* stays on the flip's frame, above Co.Stack, until the call is known: a
+* Resume's yielded stack is under Co.Stack, and an IRQ taken after
+* LDS #Co.Stack would stack over it.
+entry               ldy       #VG.Addr
                     ldb       VG.CFn,y
                     cmpb      #CF.Resume
                     lbeq      Resume
-                    lbhi      bad@
+                    lbhi      bad@      (CoRet leaves on D.CCStk: it needs no stack of CoArm's)
+                    lds       #Co.Stack
                     clr       >CoG+CG.PtrHid
                     lslb
                     leax      CallTbl,pcr

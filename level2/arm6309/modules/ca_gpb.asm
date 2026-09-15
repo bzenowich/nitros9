@@ -298,7 +298,7 @@ Swallow             pshs      b         GPLoad's data still arrives: swallow it
                     leax      Skip1,pcr
                     stx       WT.EscVct,u
 s@                  puls      b
-                    comb
+                    orcc      #Carry    not COMB: that would complement the error in B
                     rts
 
 * GPData - A = the next byte of a GPLoad
